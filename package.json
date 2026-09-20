@@ -1,0 +1,44 @@
+{
+  "name": "jev-demos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Six live demos of TypeSafe's Jev (System One) decision model, with Claude and Kimi as the interchangeable LLM: router, ticket triage, inbox at scale, slop filter, title scorer, cost calculator.",
+  "license": "MIT",
+  "author": "Mayank Aggarwal",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mayank953/Jev.git"
+  },
+  "homepage": "https://github.com/mayank953/Jev#readme",
+  "bugs": {
+    "url": "https://github.com/mayank953/Jev/issues"
+  },
+  "keywords": [
+    "jev",
+    "typesafe",
+    "llm-router",
+    "anthropic",
+    "claude",
+    "kimi",
+    "moonshot",
+    "demo"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.ts",
+    "dev": "node --watch --env-file-if-exists=.env src/server.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.127.0",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit these; copy .env.example to .env instead
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+
+# Unrelated scaffold left in this folder by another tool/session — not part of this app.
+# Left on disk untouched, but never tracked here (browser-demo/ has its own .env.local).
+browser-demo/
+hooks/
+scripts/
+.claude/
+ROUTING_SETUP.md
+SETUP_COMPLETE.txt
+verify-setup.sh
