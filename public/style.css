@@ -4,17 +4,18 @@
   --accent: #3f51d8; --accent-soft: #eceffd; --pos: #157f4b; --neg: #b42318;
   --k1: #3b6fd8; --k2: #0f8a7c; --k3: #a8730f; --k4: #b8437a; --k5: #6d4fc7; --k6: #c25e10; --k7: #667085;
   --shadow: 0 1px 2px rgba(16, 24, 40, .05);
+  --on-accent: #ffffff;
+  color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme="dark"] {
     --bg: #0e1013; --panel: #16191f; --panel2: #1c2028; --line: #2a2f39; --ink: #e7e9ee; --muted: #9aa3b2;
     --accent: #8c9bff; --accent-soft: #212745; --pos: #4cc38a; --neg: #f07a70;
     --k1: #7ea6ff; --k2: #4ccbb9; --k3: #e0b04a; --k4: #f08cb8; --k5: #a58bff; --k6: #f2a25c; --k7: #8b95a7;
     --shadow: none;
-  }
+    --on-accent: #0e1013;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html { color-scheme: light dark; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14.5px/1.55 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
 header { max-width: 1200px; margin: 0 auto; padding: 22px 28px 0; display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
 h1 { font-size: 19px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
@@ -44,14 +45,13 @@ main { max-width: 1200px; margin: 0 auto; padding: 20px 28px 80px; }
 .card h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); margin: 0 0 12px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .lede { color: var(--muted); margin: 0 0 12px; font-size: 14px; max-width: 880px; }
 .lede b { color: var(--ink); font-weight: 600; }
-textarea, input[type=text] { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+textarea, input[type=text], input[type=password] { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
 textarea { min-height: 88px; resize: vertical; }
 textarea:focus-visible, input:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
 .chip { background: var(--panel2); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 3px 10px; font: inherit; font-size: 12.5px; cursor: pointer; }
 .chip:hover { border-color: var(--accent); color: var(--accent); }
-.btn { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; color: #fff; background: var(--accent); }
-@media (prefers-color-scheme: dark) { .btn { color: #0e1013; } }
+.btn { border: 1px solid var(--accent); border-radius: 8px; padding: 8px 16px; font: inherit; font-weight: 600; font-size: 14px; cursor: pointer; color: var(--on-accent); background: var(--accent); }
 .btn:hover { filter: brightness(1.06); }
 .btn.alt { background: var(--panel); color: var(--ink); border-color: var(--line); }
 .btn.alt:hover { border-color: var(--muted); }
@@ -139,7 +139,7 @@ pre.json { background: var(--bg); border: 1px solid var(--line); border-radius: 
 .legend b { margin-left: auto; padding-left: 14px; font-variant-numeric: tabular-nums; }
 .hist { display: flex; gap: 10px; align-items: flex-end; height: 120px; }
 .hist > div { flex: 1; text-align: center; font-size: 12px; color: var(--muted); }
-.hist .col { border-radius: 4px 4px 0 0; background: var(--c); min-height: 3px; transition: height .3s; margin-bottom: 4px; color: #fff; font-weight: 600; padding-top: 2px; font-size: 11.5px; }
+.hist .col { border-radius: 4px 4px 0 0; background: var(--c); min-height: 3px; transition: height .3s; margin-bottom: 4px; color: var(--on-accent); font-weight: 600; padding-top: 2px; font-size: 11.5px; }
 
 /* feed */
 .feed { display: grid; gap: 8px; max-height: 620px; overflow-y: auto; padding-right: 4px; }
@@ -185,7 +185,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .btn.pop:hover { filter: brightness(1.05); }
 .pill.cta { background: var(--pop); border-color: var(--pop); color: var(--on-pop); font-weight: 700; box-shadow: 0 0 0 3px color-mix(in srgb, var(--pop) 22%, transparent); }
 .pill.cta:hover { filter: brightness(1.05); }
-@media (prefers-color-scheme: dark) { .btn.pop { color: var(--on-pop); } }
 
 /* clean view for screenshots: only the hero and content, no controls */
 body.shot #controls { display: none; }
@@ -213,8 +212,7 @@ body.demo main { padding-bottom: 240px; }
 .narrator { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); width: min(780px, calc(100vw - 32px)); z-index: 30; background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 12px 44px rgba(0, 0, 0, .28); padding: 12px 16px 12px; }
 .narrator[hidden] { display: none; }
 .n-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
-.n-badge { background: var(--accent); color: #fff; border-radius: 5px; padding: 1px 8px; font-weight: 700; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; }
-@media (prefers-color-scheme: dark) { .n-badge { color: #0e1013; } }
+.n-badge { background: var(--accent); color: var(--on-accent); border-radius: 5px; padding: 1px 8px; font-weight: 700; font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; }
 .n-step { font: 600 12px ui-monospace, Menlo, monospace; color: var(--accent); }
 .n-head .sp { margin-left: auto; display: inline-flex; gap: 8px; align-items: center; }
 .n-text { font-size: 16.5px; line-height: 1.45; margin-top: 6px; min-height: 48px; }
@@ -244,3 +242,7 @@ dialog.keys h2 { font-size: 17px; text-transform: none; letter-spacing: -.01em; 
   .n-text { font-size: 15px; }
 }
 }
+
+/* smooth theme switch, but never animate on first paint or for users who ask for less motion */
+html.theme-anim, html.theme-anim *, html.theme-anim *::before, html.theme-anim *::after { transition: background-color .2s, border-color .2s, color .2s, fill .2s, stroke .2s !important; }
+@media (prefers-reduced-motion: reduce) { html.theme-anim, html.theme-anim * { transition: none !important; } }

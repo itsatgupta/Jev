@@ -53,6 +53,7 @@ function renderControls() {
     <button class="pill" id="pill-provider" title="${esc(p.note || "Provider is healthy")}${p.state !== "live" ? " (click to re-check)" : ""}"><i class="dot ${p.state === "live" ? "live" : "sim"}"></i>${esc(p.label)} <b>${STATE_TEXT[p.state]}</b>${srcNote(p.keySource)}</button>
     <button class="pill" id="pill-jev" title="${esc(STATUS.jevNote || "Jev (TypeSafe)")}${STATUS.jev === "unavailable" ? " (click to re-check)" : ""}"><i class="dot ${STATUS.jev === "live" ? "live" : "sim"}"></i>Jev <b>${STATE_TEXT[STATUS.jev]}</b>${srcNote(STATUS.jevSource)}</button>
     <span class="pill" title="Real API spend on this key. Paid LLM calls stop when the cap is reached."><span class="lbl">Budget</span><b>${fmtUsd(b.spentUsd)}</b> / ${fmtUsd(b.capUsd)}<span class="meter"><i style="width:${pct}%"></i></span><button class="chip" id="budget-up" title="Raise the cap by $0.50">+$0.50</button></span>
+    <span class="seg" role="group" aria-label="Theme">${[["light", "Light"], ["system", "Auto"], ["dark", "Dark"]].map(([m, t]) => `<button data-theme-set="${m}" aria-pressed="${(document.documentElement.dataset.themePref || "system") === m}">${t}</button>`).join("")}</span>
     <button class="pill ${mine ? "" : "cta"}" id="keys-btn" title="Use your own API keys">${mine ? "Your keys ✓" : "Add your keys"}</button>`;
   const live = Object.values(STATUS.providers).some((v) => v.state === "live") && STATUS.jev === "live";
   $("#hero-note").textContent = live ? "" : "Running on simulated data right now. Use “Use your own keys” to make every number live.";
@@ -62,6 +63,15 @@ async function refreshStatus() {
 }
 document.addEventListener("click", async (e) => {
   const hit = (sel) => e.target.closest(sel);
+  const th = hit("[data-theme-set]");
+  if (th) {
+    const root = document.documentElement;
+    root.classList.add("theme-anim");
+    window.jevTheme.set(th.dataset.themeSet);
+    renderControls();
+    setTimeout(() => root.classList.remove("theme-anim"), 300);
+    return;
+  }
   const sw = hit("[data-provider]");
   if (sw) return setProvider(sw.dataset.provider);
   if (hit("#budget-up")) { STATUS = await api("/api/budget", { capUsd: P().budget.capUsd + 0.5 }); renderControls(); }
