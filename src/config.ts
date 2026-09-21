@@ -1,3 +1,5 @@
+import { bucket, keyFor, type KeyName } from "./keys.ts";
+
 export type ProviderKey = "claude" | "kimi";
 export type ModelKey = "haiku" | "sonnet" | "opus" | "kimiK26" | "kimiK3";
 export type Tier = "light" | "standard" | "frontier";
@@ -40,35 +42,49 @@ export const PROVIDERS: Record<ProviderKey, Provider> = {
 // Jev: $0.042 per 1M input tokens, output free.
 export const JEV_IN_PER_M = 0.042;
 
-export const hasJevKey = () => Boolean(process.env.TYPESAFE_API_KEY?.trim());
-export const hasKey = (p: ProviderKey) => Boolean((p === "claude" ? process.env.ANTHROPIC_API_KEY : process.env.MOONSHOT_API_KEY)?.trim());
+export const hasJevKey = () => keyFor("jev") !== undefined;
+export const hasKey = (p: ProviderKey) => keyFor(p) !== undefined;
 
 export const costUsd = (m: ModelInfo, inTok: number, outTok: number) => (inTok * m.inPerM + outTok * m.outPerM) / 1e6;
 export const jevCostUsd = (inTok: number) => (inTok * JEV_IN_PER_M) / 1e6;
 
 /* ───────────── Spend budget ─────────────
- * A hard cap on real API spend for the demo session. Once reached, paid LLM calls fall back to clearly
- * badged simulated output until the cap is raised. Jev is ~free, so it is counted but never blocked. */
-let spentUsd = 0;
-let capUsd = Number(process.env.DEMO_BUDGET_USD ?? 0.5);
+ * A hard cap on real API spend. Once reached, paid LLM calls fall back to clearly badged simulated output
+ * until the cap is raised. Every key gets its own bucket: all traffic on the server's keys shares one, and each
+ * visitor-supplied key has its own, so nobody can spend anybody else's budget. Jev is ~free, so it is counted
+ * but never blocked. */
+const defaultCap = () => Number(process.env.DEMO_BUDGET_USD ?? 0.5);
+const budgets = new Map<string, { spent: number; cap: number }>();
+const slot = (name: KeyName) => {
+  const id = bucket(name);
+  let b = budgets.get(id);
+  if (!b) {
+    if (budgets.size >= 2000) budgets.delete(budgets.keys().next().value!); // bound memory on a public host
+    b = { spent: 0, cap: defaultCap() };
+    budgets.set(id, b);
+  }
+  return b;
+};
 export const budget = {
-  spent: () => spentUsd,
-  cap: () => capUsd,
-  charge: (usd: number) => { spentUsd += usd; },
-  setCap: (usd: number) => { capUsd = usd; },
-  exhausted: () => spentUsd >= capUsd,
+  spent: (name: KeyName) => slot(name).spent,
+  cap: (name: KeyName) => slot(name).cap,
+  charge: (usd: number, name: KeyName) => { slot(name).spent += usd; },
+  setCap: (usd: number, name: KeyName) => { slot(name).cap = usd; },
+  exhausted: (name: KeyName) => slot(name).spent >= slot(name).cap,
 };
 
 /* ───────────── Provider availability ─────────────
- * Account-level failures (spend cap, bad key, no credit) mark a provider down for a cool-down window. */
-const down: Record<ProviderKey, { until: number; reason: string }> = { claude: { until: 0, reason: "" }, kimi: { until: 0, reason: "" } };
+ * Account-level failures (spend cap, bad key, no credit) mark that key down for a cool-down window. */
+const down = new Map<string, { until: number; reason: string }>();
 const COOL_DOWN_MS = 10 * 60_000; // account-level problems (spend cap, credit) do not clear in seconds
+const downId = (p: ProviderKey) => `${p}:${bucket(p)}`;
 
 export type ProviderState = "live" | "simulated" | "unavailable" | "budget";
 export function providerState(p: ProviderKey): { state: ProviderState; note: string } {
   if (!hasKey(p)) return { state: "simulated", note: "No API key set" };
-  if (budget.exhausted()) return { state: "budget", note: `Demo budget of $${capUsd.toFixed(2)} reached` };
-  if (Date.now() < down[p].until) return { state: "unavailable", note: down[p].reason };
+  if (budget.exhausted(p)) return { state: "budget", note: `Demo budget of $${budget.cap(p).toFixed(2)} reached` };
+  const d = down.get(downId(p));
+  if (d && Date.now() < d.until) return { state: "unavailable", note: d.reason };
   return { state: "live", note: "" };
 }
 export const usable = (p: ProviderKey) => providerState(p).state === "live";
@@ -82,8 +98,9 @@ export function accountError(err: unknown): string | null {
   return null;
 }
 export function markDown(p: ProviderKey, reason: string) {
-  down[p] = { until: Date.now() + COOL_DOWN_MS, reason };
+  if (down.size >= 2000) down.delete(down.keys().next().value!);
+  down.set(downId(p), { until: Date.now() + COOL_DOWN_MS, reason });
 }
 export function resetDown(p: ProviderKey) {
-  down[p] = { until: 0, reason: "" };
+  down.delete(downId(p));
 }

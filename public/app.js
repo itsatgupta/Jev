@@ -1,4 +1,6 @@
 import { Flow, Race, donut, fmtMs, fmtPct, fmtUsd } from "/flow.js";
+import { beat, callout, cue, demo, initNarrator, mountExplainers, pixelField, resetRun, setDemo } from "/demo.js";
+import { clearKeys, currentKeys, hasAnyKey, isRemembered, keyHeaders, loadKeys, saveKeys } from "/keys.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -18,7 +20,7 @@ const live = () => P().state === "live";
 
 /* ─────────── plumbing ─────────── */
 async function api(path, body) {
-  const res = await fetch(path, body ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ provider: PROVIDER, ...body }) } : undefined);
+  const res = await fetch(path, { method: body ? "POST" : "GET", headers: { ...(body ? { "content-type": "application/json" } : {}), ...keyHeaders() }, body: body ? JSON.stringify({ provider: PROVIDER, ...body }) : undefined });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -42,23 +44,74 @@ const grow = (root) => requestAnimationFrame(() => requestAnimationFrame(() => r
 
 /* ─────────── header: provider switch, status, budget ─────────── */
 const STATE_TEXT = { live: "live", simulated: "no key", unavailable: "unavailable", budget: "budget reached" };
+const srcNote = (src) => (src === "you" ? ' <span class="src">· your key</span>' : "");
 function renderControls() {
-  const p = P(), b = STATUS.budget, pct = Math.min(100, (b.spentUsd / b.capUsd) * 100);
+  const p = P(), b = p.budget, pct = Math.min(100, (b.spentUsd / b.capUsd) * 100), mine = hasAnyKey();
   $("#controls").innerHTML = `
+    <label class="switch" title="Adds narration, pacing and a guided tour for presenting"><input type="checkbox" id="demo-toggle" ${demo.on ? "checked" : ""}>Demo mode</label>
     <span class="seg" role="group" aria-label="LLM provider">${Object.entries(STATUS.providers).map(([k, v]) => `<button data-provider="${k}" aria-pressed="${k === PROVIDER}">${esc(v.label)}</button>`).join("")}</span>
-    <button class="pill" id="pill-provider" title="${esc(p.note || "Provider is healthy")}${p.state !== "live" ? " (click to re-check)" : ""}"><i class="dot ${p.state === "live" ? "live" : "sim"}"></i>${esc(p.label)} <b>${STATE_TEXT[p.state]}</b></button>
-    <span class="pill" title="Jev (TypeSafe)"><i class="dot ${STATUS.jev === "live" ? "live" : "sim"}"></i>Jev <b>${STATUS.jev === "live" ? "live" : "no key"}</b></span>
-    <span class="pill" title="Real API spend this server session. Paid LLM calls stop when the cap is reached."><span class="lbl">Budget</span><b>${fmtUsd(b.spentUsd)}</b> / ${fmtUsd(b.capUsd)}<span class="meter"><i style="width:${pct}%"></i></span><button class="chip" id="budget-up" title="Raise the cap by $0.50">+$0.50</button></span>`;
+    <button class="pill" id="pill-provider" title="${esc(p.note || "Provider is healthy")}${p.state !== "live" ? " (click to re-check)" : ""}"><i class="dot ${p.state === "live" ? "live" : "sim"}"></i>${esc(p.label)} <b>${STATE_TEXT[p.state]}</b>${srcNote(p.keySource)}</button>
+    <button class="pill" id="pill-jev" title="${esc(STATUS.jevNote || "Jev (TypeSafe)")}${STATUS.jev === "unavailable" ? " (click to re-check)" : ""}"><i class="dot ${STATUS.jev === "live" ? "live" : "sim"}"></i>Jev <b>${STATE_TEXT[STATUS.jev]}</b>${srcNote(STATUS.jevSource)}</button>
+    <span class="pill" title="Real API spend on this key. Paid LLM calls stop when the cap is reached."><span class="lbl">Budget</span><b>${fmtUsd(b.spentUsd)}</b> / ${fmtUsd(b.capUsd)}<span class="meter"><i style="width:${pct}%"></i></span><button class="chip" id="budget-up" title="Raise the cap by $0.50">+$0.50</button></span>
+    <button class="pill ${mine ? "" : "cta"}" id="keys-btn" title="Use your own API keys">${mine ? "Your keys ✓" : "Add your keys"}</button>`;
+  const live = Object.values(STATUS.providers).some((v) => v.state === "live") && STATUS.jev === "live";
+  $("#hero-note").textContent = live ? "" : "Running on simulated data right now. Use “Use your own keys” to make every number live.";
 }
 async function refreshStatus() {
   try { STATUS = await api("/api/status"); renderControls(); } catch { /* server restarting */ }
 }
 document.addEventListener("click", async (e) => {
-  const sw = e.target.closest("[data-provider]");
+  const hit = (sel) => e.target.closest(sel);
+  const sw = hit("[data-provider]");
   if (sw) return setProvider(sw.dataset.provider);
-  if (e.target.closest("#budget-up")) { STATUS = await api("/api/budget", { capUsd: STATUS.budget.capUsd + 0.5 }); renderControls(); }
-  if (e.target.closest("#pill-provider") && P().state !== "live") { await api("/api/providers/reset", {}); refreshStatus(); }
+  if (hit("#budget-up")) { STATUS = await api("/api/budget", { capUsd: P().budget.capUsd + 0.5 }); renderControls(); }
+  if (hit("#pill-provider") && P().state !== "live") { await api("/api/providers/reset", {}); refreshStatus(); }
+  if (hit("#pill-jev") && STATUS.jev === "unavailable") { await api("/api/jev/reset", {}); refreshStatus(); }
+  if (hit("#keys-btn") || hit("#hero-keys")) openKeys();
+  if (hit("#hero-tour")) startTour();
+  if (hit("#hero-shot")) document.body.classList.toggle("shot");
+  if (hit("#k-save")) saveKeysAndTest();
+  if (hit("#k-clear")) clearAllKeys();
+  if (hit("#k-close")) $("#keys-dialog").close();
 });
+document.addEventListener("change", (e) => { if (e.target.id === "demo-toggle") { setDemo(e.target.checked); if (demo.on) tabCue(currentTab); } });
+
+/* ─────────── bring your own keys ─────────── */
+const KEY_NAMES = ["jev", "claude", "kimi"];
+function openKeys() {
+  const k = currentKeys();
+  for (const n of KEY_NAMES) { $("#k-" + n).value = k[n] ?? ""; $("#kr-" + n).textContent = ""; }
+  $("#k-remember").checked = isRemembered();
+  $("#keys-dialog").showModal();
+}
+const setResult = (n, text, cls = "muted") => { const el = $("#kr-" + n); el.textContent = text; el.className = "k-result " + cls; };
+async function afterKeysChanged() {
+  await refreshStatus();
+  if (!live()) { const alt = Object.keys(STATUS.providers).find((k) => STATUS.providers[k].state === "live"); if (alt) PROVIDER = alt; }
+  renderControls(); rebuildProviderUi();
+}
+async function saveKeysAndTest() {
+  saveKeys(Object.fromEntries(KEY_NAMES.map((n) => [n, $("#k-" + n).value])), $("#k-remember").checked);
+  const btn = $("#k-save"); btn.disabled = true; btn.textContent = "Testing…";
+  try {
+    const mine = currentKeys();
+    for (const n of KEY_NAMES) setResult(n, mine[n] ? "Checking…" : "Not set: this part stays simulated");
+    if (hasAnyKey()) {
+      const { results } = await api("/api/keys/check", {});
+      for (const n of KEY_NAMES) if (results[n]) setResult(n, (results[n].ok ? "✓ " : "✕ ") + results[n].note, results[n].ok ? "good" : "bad");
+    }
+    await afterKeysChanged();
+  } catch (e) {
+    setResult("jev", e.message, "bad");
+  } finally { btn.disabled = false; btn.textContent = "Save & test"; }
+}
+async function clearAllKeys() {
+  clearKeys();
+  for (const n of KEY_NAMES) { $("#k-" + n).value = ""; setResult(n, ""); }
+  $("#k-remember").checked = false;
+  await afterKeysChanged();
+}
+
 function setProvider(k) {
   PROVIDER = k;
   try { localStorage.setItem("jev-provider", k); } catch { /* private mode */ }
@@ -81,17 +134,25 @@ const TABS = [
 ];
 const inits = { overview: initOverview, router: initRouter, triage: initTriage, inbox: initInbox, feed: initFeed, titles: initTitles, cost: initCost };
 const started = new Set();
+let currentTab = "overview";
 function showTab(id) {
+  currentTab = id;
   document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t.dataset.tab === id));
   for (const [k] of TABS) $("#view-" + k).hidden = k !== id;
   if (!started.has(id)) { started.add(id); inits[id](); }
   history.replaceState(null, "", "#" + id);
+  if (!touring) tabCue(id);
 }
 (async function boot() {
+  loadKeys();
+  if (new URLSearchParams(location.search).has("shot")) document.body.classList.add("shot");
   [STATUS, SAMPLES] = await Promise.all([api("/api/status"), api("/api/samples")]);
   MODELS = STATUS.models;
   let saved = null; try { saved = localStorage.getItem("jev-provider"); } catch { /* ignore */ }
   PROVIDER = STATUS.providers[saved] ? saved : Object.keys(STATUS.providers).find((k) => STATUS.providers[k].state === "live") ?? "claude";
+  pixelField($("#hero-art"));
+  initNarrator({ onTour: () => (touring ? stopTour() : startTour()) });
+  mountExplainers(EXPLAIN);
   renderControls();
   document.querySelectorAll(".js-small").forEach((n) => (n.textContent = label(small())));
   document.querySelectorAll(".js-big").forEach((n) => (n.textContent = label(big())));
@@ -106,6 +167,9 @@ function initOverview() {
   const TEXT = "Based on the line items and the vendor history passed in the context, this invoice appears to be legitimate. The amounts match prior purchase orders and the vendor has 14 clean payments on record, although the unusual net-90 terms may warrant a quick manual review before approval.";
   const VERDICT = `{\n  "verdict": {\n    "choice": "clean",\n    "probabilities": {\n      "clean": 0.88,\n      "review": 0.10,\n      "fraud": 0.02\n    },\n    "confidence": 0.88\n  }\n}`;
   $("#o-run").addEventListener("click", () => busy($("#o-run"), null, async () => {
+    resetRun();
+    cue("The same question goes to both. The <b>LLM</b> starts writing a sentence, one token at a time. <b>Jev</b> reads it once.", { step: 1, total: 3, spot: "#o-llm-out" });
+    await beat();
     $("#o-llm-out").className = "caret"; $("#o-llm-out").textContent = ""; $("#o-jev-out").textContent = "…";
     const t0 = performance.now(), LLM_MS = 8500, JEV_MS = 400;
     let jevDone = false;
@@ -113,10 +177,10 @@ function initOverview() {
       const iv = setInterval(() => {
         const ms = performance.now() - t0;
         if (!jevDone) $("#o-jev-t").textContent = (Math.min(ms, JEV_MS) / 1000).toFixed(2) + " s";
-        if (!jevDone && ms >= JEV_MS) { jevDone = true; $("#o-jev-out").textContent = VERDICT; }
+        if (!jevDone && ms >= JEV_MS) { jevDone = true; $("#o-jev-out").textContent = VERDICT; cue("<b>0.4 s:</b> Jev is already done. It returned a <b>typed verdict with probabilities</b>, so code can branch on it directly.", { step: 2, total: 3, spot: "#o-jev-out" }); }
         $("#o-llm-t").textContent = (Math.min(ms, LLM_MS) / 1000).toFixed(1) + " s";
         $("#o-llm-out").textContent = TEXT.slice(0, Math.floor((Math.min(ms, LLM_MS) / LLM_MS) * TEXT.length));
-        if (ms >= LLM_MS) { $("#o-llm-out").className = ""; clearInterval(iv); res(); }
+        if (ms >= LLM_MS) { $("#o-llm-out").className = ""; clearInterval(iv); cue("<b>8.5 s:</b> the LLM finishes a paragraph that a program still has to parse. Jev's answer arrived about <b>20× earlier</b>.", { step: 3, total: 3 }); res(); }
       }, 40);
     });
   }));
@@ -140,6 +204,7 @@ function initRouter() {
     $("#r-out").innerHTML = ""; $("#r-bench-out").innerHTML = "";
     const r = await routeOnce($("#r-prompt").value, $("#r-baseline").checked, true);
     $("#r-out").innerHTML = renderRoute(r); grow($("#r-out"));
+    callout($("#r-out"), routeNotes(r));
   }));
   $("#r-bench").addEventListener("click", () => busy($("#r-bench"), $("#r-bench-out"), () => routeBench()));
 }
@@ -165,6 +230,7 @@ async function routeOnceInner(prompt, baseline, anim) {
   const f = anim ? R.flow : null, race = anim ? R.race : null;
   if (!prompt.trim()) throw new Error("Type or pick a prompt first");
   f?.reset(); race?.reset();
+  if (anim) { resetRun(); cue(`Your prompt (${prompt.length} characters) goes to <b>Jev first</b>, not to a big model. Jev is the router.`, { step: 1, total: 5, spot: "#r-flow" }); await beat(); }
   f?.state("prompt", "done", `${prompt.length} chars`);
   race?.start("routed", 6000);
   let baseP = null;
@@ -175,21 +241,40 @@ async function routeOnceInner(prompt, baseline, anim) {
   const stopJev = f?.timer("jev"), sent = f?.send("prompt", "jev", { ms: 350 });
   const decision = await api("/api/route/decide", { prompt });
   await sent; stopJev?.(fmtMs(decision.latencyMs));
+  if (anim) {
+    cue(`Jev answered <b>3 typed questions in one pass</b> (${fmtMs(decision.latencyMs)}): this needs the <b>${decision.jevTier}</b> tier, ${fmtPct(decision.confidence)} sure, complexity ${decision.complexity.toFixed(1)} out of 3.`, { step: 2, total: 5 });
+    await beat();
+    if (decision.escalated) { cue(`Confidence guard: Jev is under 60% sure, so the code <b>escalates one tier</b> to ${decision.tier}. A wrong downgrade costs more than a wasted upgrade.`); await beat(); }
+  }
   const t = decision.tier;
   if (f) for (const o of TIERS) if (o !== t) { f.dim(o); f.edge("jev", o, "dim"); }
   await f?.send("jev", t, { color: t, ms: 300 });
+  if (anim) cue(`Only <b>${label(decision.model)}</b> is called. The other tiers cost <b>$0</b> for this request.`, { step: 3, total: 5 });
   const stop = f?.timer(t);
   const answer = await api("/api/route/answer", { prompt, tier: t });
   stop?.(fmtMs(answer.latencyMs));
   race?.finish("routed", 0, fmtMs(decision.latencyMs + answer.latencyMs)); // measured API time, not animation time
+  if (anim) { cue(`${label(answer.model)} answered in ${fmtMs(answer.latencyMs)} for ${fmtUsd(answer.costUsd)}. Jev's own decision cost just <b>${fmtUsd(decision.costUsd)}</b>.`, { step: 4, total: 5, spot: "#r-race" }); await beat(); }
   await f?.send(t, "answer", { color: t, ms: 300 });
   f?.state("answer", "done", fmtUsd(decision.costUsd + answer.costUsd));
   const base = baseP ? await baseP : null;
   const top = MODELS[big()];
   const baseCost = base ? base.costUsd : (answer.inputTokens * top.inPerM + answer.outputTokens * top.outPerM) / 1e6;
   const total = decision.costUsd + answer.costUsd;
+  if (anim) cue(`Routed total <b>${fmtUsd(total)}</b> versus <b>${fmtUsd(baseCost)}</b> if every request went to ${label(big())}${baseCost > total ? `: <b>${Math.round(((baseCost - total) / baseCost) * 100)}% saved</b>` : ""}.`, { step: 5, total: 5, spot: "#r-out" });
   return { decision, answer, base, baseCost, total, saved: baseCost - total };
 }
+
+const routeNotes = (r) => {
+  const d = r.decision, top = label(big()), pct = r.baseCost ? Math.max(0, Math.round((r.saved / r.baseCost) * 100)) : 0;
+  return [
+    `Routing itself cost <b>${fmtUsd(d.costUsd)}</b> and took <b>${fmtMs(d.latencyMs)}</b>. That is the entire price of the decision.`,
+    d.tier === "frontier"
+      ? `This is a hard prompt, so Jev sent it to the top tier. Routing never makes hard prompts worse; it stops easy ones from overpaying.`
+      : `This prompt only needed <b>${label(d.model)}</b>, so it skipped the expensive tier: <b>${pct}% cheaper</b> than always using ${top}.`,
+    `Jev returns <b>calibrated probabilities</b>, so your own code sets the threshold (here: escalate below 60% confidence).`,
+  ];
+};
 
 function renderRoute(r) {
   const d = r.decision, a = r.answer, pctSaved = r.baseCost ? (r.saved / r.baseCost) * 100 : 0, topName = label(big());
@@ -249,6 +334,7 @@ function initTriage() {
     $("#t-out").innerHTML = ""; $("#t-bench-out").innerHTML = "";
     const r = await triageOnce($("#t-ticket").value, $("#t-compare").checked && live(), $("#t-draft").checked, true);
     $("#t-out").innerHTML = renderTriage(r);
+    callout($("#t-out"), triageNotes(r));
   }));
   $("#t-bench").addEventListener("click", () => busy($("#t-bench"), $("#t-bench-out"), () => triageBench()));
 }
@@ -277,6 +363,11 @@ async function triageOnceInner(ticket, compare, draft, anim) {
   if (!ticket.trim()) throw new Error("Type or pick a ticket first");
   const f = anim ? T.flow : null, race = anim ? T.race : null;
   f?.reset(); race?.reset();
+  if (anim) {
+    resetRun();
+    cue(`One <b>Jev</b> call asks <b>six typed questions</b> about the ticket: department, urgency, frustration, refund, churn and spam.${compare ? ` The same ticket also goes to ${label(small())} as a classifier, so you can compare.` : ""}`, { step: 1, total: 5, spot: "#t-flow" });
+    await beat();
+  }
   f?.state("ticket", "done", `${ticket.length} chars`);
   race?.start("jev", 1800);
   compare ? race?.start("llm", 2600) : race?.skip("llm", "off");
@@ -285,19 +376,34 @@ async function triageOnceInner(ticket, compare, draft, anim) {
   const jevP = api("/api/triage/jev", { ticket }).then((r) => { race?.finish("jev", 0, fmtMs(r.jev.latencyMs)); stopJ?.(fmtMs(r.jev.latencyMs)); return r; });
   const llmP = compare ? api("/api/triage/llm", { ticket }).then((r) => { race?.finish("llm", 0, r ? fmtMs(r.latencyMs) : "n/a"); stopL?.(r ? fmtMs(r.latencyMs) : "n/a"); return r; }) : Promise.resolve(null);
   const jevR = await jevP, { action, reasons } = jevR;
+  if (anim) {
+    const x = jevR.jev.triage;
+    cue(`Jev answered all six in ${fmtMs(jevR.jev.latencyMs)}: <b>${x.department}</b>, urgency ${x.urgency.toFixed(1)}/3, churn risk ${fmtPct(x.churnRisk)}, spam ${fmtPct(x.spam)}.`, { step: 2, total: 5, spot: "#t-race" });
+    await beat();
+  }
   await f?.send("jev", "rules", { ms: 350 });
   f?.state("rules", "done", action);
+  if (anim) { cue(`Now <b>plain code, no AI</b>, decides: <b>${action}</b> because ${esc(reasons.join(", "))}.`, { step: 3, total: 5 }); await beat(); }
   const target = { discard: "discard", escalate: "human", "auto-reply": "auto" }[action], tone = action === "escalate" ? "frontier" : action === "auto-reply" ? "light" : "io";
   if (f) for (const o of ["discard", "human", "auto"]) if (o !== target) { f.dim(o); f.edge("rules", o, "dim"); }
   await f?.send("rules", target, { color: tone, ms: 400 });
+  if (anim) cue(action === "discard" ? "Spam never reaches an LLM: <b>$0</b> spent." : action === "escalate" ? `Risky tickets get the <b>bigger model</b> (${label(P().mid)}) to draft a careful reply.` : `Easy tickets get the <b>small, cheap model</b> (${label(small())}) for a quick reply.`, { step: 4, total: 5 });
   let reply = null;
   if (draft && action !== "discard") {
     const stop = f?.timer(target);
     reply = await api("/api/triage/reply", { ticket, department: jevR.jev.triage.department, action });
     stop?.(fmtMs(reply.latencyMs));
   } else f?.state(target, "done");
-  return { jev: jevR.jev, llm: await llmP, action, reasons, reply };
+  const llm = await llmP;
+  if (anim) cue(llm ? `Same classification by ${label(small())}: <b>${fmtMs(llm.latencyMs)}</b> vs Jev's <b>${fmtMs(jevR.jev.latencyMs)}</b> (${(llm.latencyMs / jevR.jev.latencyMs).toFixed(1)}× slower) and ${(llm.costUsd / jevR.jev.costUsd).toFixed(0)}× the cost.` : `Done. Jev did the whole triage decision in ${fmtMs(jevR.jev.latencyMs)}.`, { step: 5, total: 5, spot: "#t-out" });
+  return { jev: jevR.jev, llm, action, reasons, reply };
 }
+
+const triageNotes = (r) => [
+  `Jev returned <b>six answers in one call</b> (${fmtMs(r.jev.latencyMs)}, ${fmtUsd(r.jev.costUsd)}). An LLM would need a prompt, a schema and a parser for the same thing.`,
+  `The routing rules are <b>ordinary if-statements</b> on Jev's probabilities. You can read, test and change them without touching a model.`,
+  r.llm ? `As a classifier, ${esc(label(small()))} was <b>${(r.llm.latencyMs / r.jev.latencyMs).toFixed(1)}× slower</b> and cost <b>${(r.llm.costUsd / r.jev.costUsd).toFixed(0)}×</b> more for the same job.` : `Turn on the classifier race to see Jev against a small LLM on the same ticket.`,
+];
 
 const field = (name, v, fmt) => `<div class="stat"><span>${name}</span><b>${fmt(v)}</b></div>`;
 function triageCol(title, t, tone) {
@@ -375,16 +481,28 @@ function drawInbox(s, extra = {}) {
 async function runInbox() {
   const raceLlm = $("#i-race").checked && live(), n = raceLlm ? Math.min(+$("#i-n").value, RACE_CAP) : +$("#i-n").value;
   const emails = await api("/api/inbox/sample?n=" + n);
+  $("#i-note").innerHTML = "";
+  resetRun();
+  cue(`Every email is one Jev call with <b>5 judgements</b>. ${JEV_CONC} calls run <b>in parallel</b>${raceLlm ? ` while ${label(small())} does the same job in the lane below` : ""}. Watch the counters.`, { step: 1, total: 5, spot: "#i-flow" });
+  await beat();
   const s = { done: 0, cat: {}, urg: [0, 0, 0, 0], top: [], jevCost: 0, jevTok: 0, errors: 0, llmDone: 0, llmOk: 0, llmCost: 0, scam: 0, deals: 0 };
   I.flow.reset(); I.race.reset();
   I.flow.state("emails", "done", `${n} emails`);
   I.flow.state("jev", "active"); if (raceLlm) I.flow.state("llm", "active"); else I.flow.dim("llm");
-  const t0 = performance.now(); let jevEnd = null, llmEnd = null, queued = false;
+  const t0 = performance.now(); let jevEnd = null, llmEnd = null, queued = false, mark = 0;
   I.race.start("jev", 1, true); raceLlm ? I.race.start("llm", 1, true) : I.race.skip("llm", "off");
   const sl = label(small());
   const paint = () => {
     queued = false;
     const now = performance.now(), jt = (jevEnd ?? now) - t0, avgJev = s.done ? s.jevCost / s.done : 0;
+    if (mark < 3 && s.done / n >= [0.25, 0.5, 0.75][mark]) {
+      cue([
+        `<b>${s.done} of ${n}</b> classified after ${fmtMs(jt)}, about <b>${(s.done / Math.max(0.05, jt / 1000)).toFixed(1)} emails a second</b>, and Jev has cost only ${fmtUsd(s.jevCost)} so far.`,
+        `Halfway: <b>${s.cat.scam ?? 0} scams</b> flagged and ${s.deals} brand deals found. Each email got a category, urgency, scam and reply score.`,
+        `Almost there. ${raceLlm ? `${label(small())} has finished ${s.llmDone} of ${n}; Jev is far ahead.` : `Jev is still running ${JEV_CONC} calls at a time.`}`,
+      ][mark], { step: 2 + mark, total: 5, spot: "#i-kpis" });
+      mark++;
+    }
     const avgLlm = s.llmOk ? s.llmCost / s.llmOk : avgJev ? ((s.jevTok / s.done) * MODELS[small()].inPerM + 90 * MODELS[small()].outPerM) / 1e6 : 0;
     drawInbox(s, {
       kpis: [
@@ -421,6 +539,13 @@ async function runInbox() {
     I.race.finish("llm", llmEnd - t0); I.flow.state("llm", "done", fmtMs(llmEnd - t0));
   }) : Promise.resolve();
   await Promise.all([jevRun, llmRun]); paint();
+  const avgJevFinal = s.done ? s.jevCost / s.done : 0;
+  cue(`Done: <b>${n} emails in ${fmtMs(jevEnd - t0)}</b> for <b>${fmtUsd(s.jevCost)}</b>. At this price, one million emails would cost about <b>${fmtUsd(avgJevFinal * 1e6)}</b>.${raceLlm && s.llmOk ? ` ${label(small())} needed ${fmtMs(llmEnd - t0)} and ${fmtUsd(s.llmCost)}.` : ""}`, { step: 5, total: 5, spot: "#i-kpis" });
+  callout($("#i-note"), [
+    `Nothing here generated text. Every email got <b>typed answers</b> (category, urgency, scam, reply), so a dashboard could be drawn straight from them.`,
+    `Speed comes from <b>parallel calls</b>: ${JEV_CONC} at a time. More parallelism means an even faster finish, since Jev's cost per email stays the same.`,
+    `The donut and histogram are just counts of Jev's answers. <b>${s.scam} scams</b> and <b>${s.deals} brand deals</b> were separated from the noise automatically.`,
+  ]);
 }
 
 /* ═══════════════════ 4 · Slop filter ═══════════════════ */
@@ -436,19 +561,34 @@ function initFeed() {
     ],
     edges: [["post", "jev"], ["jev", "label"], ["label", "feed"]].map(([from, to]) => ({ from, to })),
   });
-  $("#f-hide").addEventListener("change", (e) => $("#f-feed").classList.toggle("hideslop", e.target.checked));
+  $("#f-hide").addEventListener("change", (e) => {
+    $("#f-feed").classList.toggle("hideslop", e.target.checked);
+    if (e.target.checked) cue(`Your rule: hide anything Jev calls AI slop. <b>${F.slop ?? 0} posts vanished</b> with zero extra model calls, because the label was already attached.`, { spot: "#f-feed" });
+  });
   $("#f-go").addEventListener("click", startFeed);
   $("#f-stop").addEventListener("click", () => { clearInterval(F.timer); $("#f-go").disabled = false; });
   paintFeed();
 }
 function startFeed() {
   clearInterval(F.timer);
-  $("#f-go").disabled = true; $("#f-feed").innerHTML = "";
+  $("#f-go").disabled = true; $("#f-feed").innerHTML = ""; $("#f-note").innerHTML = "";
+  resetRun();
+  cue("Posts stream in. Jev labels each one <b>as it lands</b>: its kind, how likely it is machine-written, and whether it is worth reading. One call each.", { step: 1, total: 4, spot: "#f-feed" });
   Object.assign(F, { n: 0, slop: 0, ms: 0, cost: 0, tok: 0, idx: 0, done: 0 });
   paintFeed();
   const MAX = 24;
   F.timer = setInterval(async () => {
-    if (F.n >= MAX) { clearInterval(F.timer); $("#f-go").disabled = false; return; }
+    if (F.n >= MAX) {
+      clearInterval(F.timer); $("#f-go").disabled = false;
+      setTimeout(() => {
+        cue(`Feed complete: <b>${F.done} posts</b> judged at ${F.done ? fmtMs(F.ms / F.done) : "–"} each, <b>${F.slop} flagged as slop</b>, total Jev spend ${fmtUsd(F.cost)}.`, { step: 4, total: 4, spot: "#f-kpis" });
+        callout($("#f-note"), [
+          `Each label took about <b>${F.done ? fmtMs(F.ms / F.done) : "–"}</b>, fast enough to run <b>before a post is even shown</b>. An LLM per post would be visibly slow and far pricier.`,
+          `The filter is a one-line rule on Jev's answer (<b>kind = ai_slop</b>). Change the rule, not the model.`,
+        ]);
+      }, 1500);
+      return;
+    }
     const p = SAMPLES.feedPosts[F.idx++ % SAMPLES.feedPosts.length]; F.n++;
     const card = document.createElement("div");
     card.className = "post"; card.innerHTML = `<div>${esc(p.text)}</div><div class="meta"><span class="pending">Jev is judging…</span></div>`;
@@ -460,6 +600,8 @@ function startFeed() {
       if (v.kind === "ai_slop") { card.classList.add("slop"); F.slop++; }
       card.querySelector(".meta").innerHTML = `<span class="badge tone-${v.kind}">${v.kind.replace("_", " ")}</span><span>${fmtPct(v.kindConfidence)} sure</span><span>AI-written ${fmtPct(v.aiWritten)}</span><span>worth reading ${v.worthReading.toFixed(1)}/3</span><span style="margin-left:auto">${fmtMs(r.latencyMs)}${r.simulated ? " · simulated" : ""}</span>`;
       F.done++; F.ms += r.latencyMs; F.cost += r.costUsd; F.tok += r.inputTokens;
+      if (F.done === 1) cue(`First post labelled <b>${v.kind.replace("_", " ")}</b> in ${fmtMs(r.latencyMs)}, ${fmtPct(v.kindConfidence)} sure. That single call also scored AI-written and worth-reading.`, { step: 2, total: 4, spot: "#f-flow" });
+      if (v.kind === "ai_slop" && F.slop === 1) cue(`Caught one: flagged <b>AI slop</b> (${fmtPct(v.aiWritten)} likely machine-written). Tick “hide slop” to remove it from the feed.`, { step: 3, total: 4 });
       F.flow.state("jev", "active", fmtMs(r.latencyMs)); F.flow.send("jev", "label", { ms: 200 }).then(() => F.flow.send("label", "feed", { ms: 200, color: v.kind === "ai_slop" ? "var(--k4)" : "good" }));
     } catch (e) { card.querySelector(".meta").innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     paintFeed();
@@ -499,10 +641,15 @@ function layoutBoard(rows) {
 }
 async function runTitles() {
   const topic = $("#ti-topic").value.trim(), n = +$("#ti-n").value; if (!topic) throw new Error("Enter a topic");
-  const board = $("#ti-board"); board.innerHTML = ""; $("#ti-kpis").innerHTML = ""; TI.flow.reset();
+  const board = $("#ti-board"); board.innerHTML = ""; $("#ti-kpis").innerHTML = ""; $("#ti-note").innerHTML = ""; TI.flow.reset();
+  resetRun();
+  cue(`<b>${label(small())}</b> writes ${n} candidate titles. Writing is what an LLM is for.`, { step: 1, total: 4, spot: "#ti-flow" });
+  await beat();
   TI.flow.state("topic", "done", "");
   const stopW = TI.flow.timer("writer"); TI.flow.send("topic", "writer", { ms: 300 });
   const gen = await api("/api/titles/generate", { topic, n }); stopW(fmtMs(gen.latencyMs ?? 0));
+  cue(`Now <b>Jev scores every title in parallel</b>, four judgements each: click appeal, clarity, hype and specificity. No text is generated; the leaderboard re-ranks as scores arrive.`, { step: 2, total: 4, spot: "#ti-board" });
+  await beat();
   board.style.height = gen.titles.length * ROW_H + "px";
   const rows = gen.titles.map((t) => {
     const d = document.createElement("div"); d.className = "trow";
@@ -521,7 +668,13 @@ async function runTitles() {
     layoutBoard(rows);
     TI.flow.send("jev", "board", { ms: 250 });
   });
-  const jevMs = performance.now() - t0; stopJ(fmtMs(jevMs)); TI.flow.state("board", "done", `#1 scored ${Math.max(...rows.map((r) => r.score))}`);
+  const jevMs = performance.now() - t0; stopJ(fmtMs(jevMs));
+  const best = [...rows].sort((a, b) => b.score - a.score)[0];
+  cue(`All ${done} titles judged in <b>${fmtMs(jevMs)}</b> for <b>${fmtUsd(cost)}</b>. Winner: “${esc(best.title.slice(0, 60))}” at <b>${best.score}/100</b>.`, { step: 4, total: 4, spot: "#ti-board" });
+  callout($("#ti-note"), [
+    `The <b>LLM writes, Jev judges</b>: two different jobs, two different models, one pipeline.`,
+    `Scoring ${done} titles cost ${fmtUsd(cost)}. Scaling to a thousand candidates is still pennies, which is what makes “generate many, keep the best” practical.`,
+  ]); TI.flow.state("board", "done", `#1 scored ${Math.max(...rows.map((r) => r.score))}`);
   const m = MODELS[small()], est = (done * ((tok / done) * m.inPerM + 90 * m.outPerM)) / 1e6;
   $("#ti-kpis").innerHTML = [
     kpi("jev", `Jev scored ${done} titles${gen.simulated ? " · titles simulated" : ""}`, fmtMs(jevMs), "in parallel, four judgements each"),
@@ -532,9 +685,18 @@ async function runTitles() {
 }
 
 /* ═══════════════════ 6 · Cost at scale ═══════════════════ */
+let lastCost, costTimer;
 function initCost() {
-  document.querySelectorAll("#view-cost input").forEach((i) => i.addEventListener("input", drawCost));
+  document.querySelectorAll("#view-cost input").forEach((i) => i.addEventListener("input", () => {
+    drawCost();
+    clearTimeout(costTimer);
+    costTimer = setTimeout(costCue, 450);
+  }));
   drawCost();
+}
+function costCue() {
+  const c = lastCost; if (!c) return;
+  cue(`At <b>${c.vol.toLocaleString()}</b> decisions a day, Jev costs <b>${fmtUsd(c.j.month)}</b> a month. ${label(big())} costs <b>${fmtUsd(c.bg.month)}</b> (<b>${(c.bg.month / c.j.month).toFixed(0)}×</b> more). Same decisions, different bill.`, { step: 1, total: 1, spot: "#c-bars" });
 }
 function drawCost() {
   const vol = Math.round(10 ** +$("#c-vol").value), tin = +$("#c-in").value, tout = +$("#c-out").value;
@@ -552,4 +714,55 @@ function drawCost() {
     kpi("gold", `Jev vs ${esc(sm.name)}`, (sm.month / j.month).toFixed(0) + "×", `saves ${fmtUsd(sm.month - j.month)} a month`),
     kpi("", `Saved vs ${esc(bg.name)} / year`, fmtUsd((bg.month - j.month) * 12), "at this volume"),
   ].join("");
+  lastCost = { vol, j, sm, bg };
 }
+
+/* ═══════════════════ Demo mode: guides, tab intros and the guided tour ═══════════════════ */
+const EXPLAIN = {
+  overview: { title: "How Jev works", body: "Start here. This page explains the idea the other six demos build on: <b>an LLM writes text, Jev returns a typed decision</b>.", steps: ["Press <b>Run the duel</b> and watch both finish.", "Click each answer type (choice, score, yes/no) to see the shape of Jev's output.", "Then open <b>LLM router</b> for the first real demo."] },
+  router: { title: "LLM router", body: "Jev reads each prompt and picks the <b>cheapest model that can handle it</b>. Easy prompts skip the expensive tier.", steps: ["Click a sample chip, for example <b>Rewrite</b> (easy) or <b>Race condition</b> (hard).", "Press <b>Route &amp; answer</b>.", "Watch the packet travel Jev → one model. The other tiers stay dark: that is the saving."] },
+  triage: { title: "Ticket triage", body: "One Jev call answers <b>six questions</b> about a support ticket. Plain if-statements then decide what happens.", steps: ["Pick a sample ticket such as <b>Cancel threat</b>.", "Press <b>Triage ticket</b> with the classifier race on.", "Compare Jev's lane against the LLM's: same job, different speed and price."] },
+  inbox: { title: "Inbox at scale", body: "Classify a whole inbox <b>in parallel</b>. This is where cheap, fast decisions add up.", steps: ["Leave the size at 60 (the LLM race is capped at 50 to save money).", "Press <b>Classify inbox</b>.", "Watch the donut, histogram and cost-per-million update live."] },
+  feed: { title: "Slop filter", body: "Posts stream in and Jev labels each one in real time. A one-line rule can then hide the slop.", steps: ["Press <b>Start feed</b>.", "Watch the labels appear a fraction of a second after each post.", "Tick <b>hide AI slop</b> to clean the feed instantly."] },
+  titles: { title: "Title scorer", body: "An LLM <b>writes</b> titles and Jev <b>judges</b> them. Two models, each doing what it is best at.", steps: ["Keep or change the topic.", "Press <b>Generate &amp; rank</b>.", "Watch the leaderboard re-rank as Jev's scores arrive."] },
+  cost: { title: "Cost at scale", body: "The same decisions priced across every model. Small per-call gaps become large monthly bills.", steps: ["Drag <b>Decisions per day</b> up to a million.", "Compare Jev's bar with each model.", "Try more input tokens to see how the gap grows."] },
+};
+const TAB_INTRO = {
+  overview: "Welcome. The idea in one line: <b>an LLM writes text, Jev returns a typed decision</b>. Run the duel to see the difference.",
+  router: "<b>LLM router.</b> Jev decides which model should answer, before any expensive model is called. Pick a sample and press Route.",
+  triage: "<b>Ticket triage.</b> One Jev call, six typed questions, then plain code decides. Pick a ticket and press Triage.",
+  inbox: "<b>Inbox at scale.</b> Hundreds of emails, classified in parallel. Press Classify inbox and watch the clock.",
+  feed: "<b>Slop filter.</b> Jev labels a stream of posts live. Press Start feed, then try “hide slop”.",
+  titles: "<b>Title scorer.</b> An LLM writes titles, Jev scores them in parallel. Press Generate &amp; rank.",
+  cost: "<b>Cost at scale.</b> The same decisions priced across every model. Drag the slider up to see the gap grow.",
+};
+function tabCue(id) { resetRun(); cue(TAB_INTRO[id]); }
+
+let touring = false;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+async function runAndWait(sel, timeout = 120000) {
+  const b = $(sel); b.click(); await wait(250);
+  const t = Date.now();
+  while (touring && b.disabled && Date.now() - t < timeout) await wait(150);
+}
+async function narrate(html, opts, mult = 2) { cue(html, opts); await wait(demo.paceMs * mult); }
+const setTourButton = () => { $("#n-tour").textContent = touring ? "■ Stop tour" : "▶ Guided tour"; };
+function stopTour() { touring = false; setTourButton(); }
+async function startTour() {
+  if (touring) return;
+  touring = true; setDemo(true); renderControls(); setTourButton();
+  $("#hero").scrollIntoView({ block: "start" });
+  try {
+    showTab("overview"); await narrate("Welcome to the guided tour. About two minutes, six demos. First, the core idea.", { step: 1, total: 8, label: "Tour" }, 2.5);
+    if (touring) await runAndWait("#o-run");
+    if (touring) { showTab("router"); $("#r-baseline").checked = false; $$chip("#r-samples", 2); await narrate("Demo 1: the <b>LLM router</b>. First, an easy request: a simple rewrite.", { step: 2, total: 8, label: "Tour" }); await runAndWait("#r-go"); }
+    if (touring) { $$chip("#r-samples", 7); await narrate("Now a genuinely hard prompt. Watch Jev choose a different tier.", { step: 3, total: 8, label: "Tour" }); await runAndWait("#r-go"); }
+    if (touring) { showTab("triage"); $$chip("#t-samples", 2); await narrate("Demo 2: <b>ticket triage</b>. An angry customer threatening to cancel.", { step: 4, total: 8, label: "Tour" }); await runAndWait("#t-go"); }
+    if (touring) { showTab("inbox"); $("#i-n").value = "25"; $("#i-race").checked = false; await narrate("Demo 3: <b>an inbox at scale</b>. 25 emails, classified in parallel.", { step: 5, total: 8, label: "Tour" }); await runAndWait("#i-go"); }
+    if (touring) { showTab("feed"); await narrate("Demo 4: a <b>live slop filter</b>. A short feed streams in.", { step: 6, total: 8, label: "Tour" }); $("#f-go").click(); await wait(9500); if (touring) { $("#f-hide").checked = true; $("#f-hide").dispatchEvent(new Event("change")); await wait(demo.paceMs * 2); } $("#f-stop").click(); }
+    if (touring) { showTab("titles"); $("#ti-n").value = "8"; await narrate("Demo 5: an <b>LLM writes titles, Jev ranks them</b>.", { step: 7, total: 8, label: "Tour" }); await runAndWait("#ti-go"); }
+    if (touring) { showTab("cost"); const v = $("#c-vol"); v.value = "6"; v.dispatchEvent(new Event("input")); await wait(demo.paceMs * 4); }
+    if (touring) { showTab("overview"); $("#hero").scrollIntoView({ block: "start" }); cue("That was the tour. <b>Add your own keys</b> to make every number live, or open any tab and run it yourself.", { step: 8, total: 8, label: "Tour" }); }
+  } finally { stopTour(); }
+}
+function $$chip(container, i) { document.querySelectorAll(container + " .chip")[i]?.click(); }

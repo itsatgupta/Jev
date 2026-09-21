@@ -1,10 +1,22 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
-import { MODELS, accountError, budget, costUsd, markDown, usable, type ModelKey } from "./config.ts";
+import { MODELS, accountError, budget, costUsd, markDown, usable, type ModelKey, type ProviderKey } from "./config.ts";
+import { keyFor } from "./keys.ts";
 
-let claude: Anthropic | undefined;
-const anthropic = () => (claude ??= new Anthropic());
+const claudeClients = new Map<string, Anthropic>();
+/** One client per key (never shared across visitors); bounded so a public host can't grow it forever. */
+function anthropic() {
+  const apiKey = keyFor("claude");
+  if (!apiKey) throw new Error("No Claude key");
+  let c = claudeClients.get(apiKey);
+  if (!c) {
+    if (claudeClients.size >= 50) claudeClients.clear();
+    c = new Anthropic({ apiKey });
+    claudeClients.set(apiKey, c);
+  }
+  return c;
+}
 const KIMI_BASE = process.env.MOONSHOT_BASE_URL ?? "https://api.moonshot.ai/v1";
 
 export type Effort = "low" | "medium" | "high";
@@ -42,7 +54,7 @@ async function kimiChat(model: ModelKey, system: string | undefined, prompt: str
   };
   const res = await fetch(`${KIMI_BASE}/chat/completions`, {
     method: "POST",
-    headers: { authorization: `Bearer ${process.env.MOONSHOT_API_KEY}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${keyFor("kimi")}`, "content-type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(90_000),
   });
@@ -98,7 +110,7 @@ export async function complete(
     return simulate();
   }
   const cost = costUsd(info, inputTokens, outputTokens);
-  budget.charge(cost);
+  budget.charge(cost, info.provider);
   return { model, text, inputTokens, outputTokens, latencyMs: Math.round(performance.now() - started), costUsd: cost, simulated: false };
 }
 
@@ -137,6 +149,13 @@ export async function parseWith<S extends z.ZodType>(model: ModelKey, schema: S,
     throw err;
   }
   const cost = costUsd(info, inputTokens, outputTokens);
-  budget.charge(cost);
+  budget.charge(cost, info.provider);
   return { value, inputTokens, outputTokens, latencyMs: Math.round(performance.now() - started), costUsd: cost };
+}
+
+/** Cheapest possible real call, used to validate a key. Throws with the provider's error if it fails. */
+export async function probeLlm(p: ProviderKey) {
+  const model = p === "kimi" ? "kimiK26" : "haiku";
+  if (p === "kimi") await kimiChat(model, undefined, "hi", { maxTokens: 1 });
+  else await anthropic().messages.create({ model: MODELS[model].id, max_tokens: 1, messages: [{ role: "user", content: "hi" }] });
 }

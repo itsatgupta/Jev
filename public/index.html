@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jev Demos</title>
+<title>Jev Demos: typed decisions vs LLMs</title>
+<meta name="description" content="Six live demos of TypeSafe's Jev decision model racing Claude and Kimi: LLM router, ticket triage, inbox at scale, slop filter, title scorer and cost calculator.">
+<meta property="og:title" content="Jev Demos: typed decisions vs LLMs">
+<meta property="og:description" content="Decisions in milliseconds, words only when you need them. Six live demos with a guided demo mode. Bring your own keys.">
+<meta property="og:type" content="website">
+<link rel="icon" href="/logo.png" type="image/png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -16,6 +21,22 @@
 <main>
 <!-- ═════════ OVERVIEW ═════════ -->
 <section class="view" id="view-overview">
+  <section class="hero" id="hero">
+    <div class="hero-art" id="hero-art" aria-hidden="true"></div>
+    <div class="hero-main">
+      <img class="hero-logo" src="/logo.png" width="72" height="72" alt="Jev logo">
+      <div class="hero-copy">
+        <h2 class="hero-title">Decisions in milliseconds. Words only when you need them.</h2>
+        <div class="hero-cta">
+          <button class="btn" id="hero-tour">▶ Start guided tour</button>
+          <button class="btn pop" id="hero-keys">Use your own keys</button>
+          <a class="btn alt" href="https://www.youtube.com/watch?v=d9lCIVc5AyU" target="_blank" rel="noopener">▶ Watch the video</a>
+        </div>
+        <div class="hero-note" id="hero-note"></div>
+      </div>
+    </div>
+    <button class="hero-shot" id="hero-shot" title="Hides the header controls for a clean screenshot">Clean view</button>
+  </section>
   <div class="card">
     <h2>An LLM writes an answer. Jev returns a verdict.</h2>
     <p class="lede">Same question: <b>“Is this invoice fraudulent?”</b> An LLM generates a sentence token by token. Jev reads the same state and returns a <b>typed choice with probabilities</b> in one pass. Timings are illustrative, taken from TypeSafe's launch material (about 8.5 s vs 0.4 s).</p>
@@ -90,6 +111,7 @@
   </div>
   <div class="card"><h2>Live pipeline</h2><div id="i-flow"></div><div id="i-lanes" style="margin-top:10px"></div></div>
   <div id="i-kpis" class="kpis" style="margin-bottom:16px"></div>
+  <div id="i-note"></div>
   <div class="grid">
     <div class="card"><h2>Categories</h2><div class="donut-wrap"><div id="i-donut"></div><div class="legend" id="i-legend"></div></div></div>
     <div class="card"><h2>Importance</h2><div class="hist" id="i-hist"></div><h2 style="margin-top:16px">Needs attention now</h2><div id="i-top" class="muted">Nothing yet.</div></div>
@@ -109,6 +131,7 @@
   </div>
   <div class="card"><h2>Live pipeline</h2><div id="f-flow"></div></div>
   <div id="f-kpis" class="kpis" style="margin-bottom:16px"></div>
+  <div id="f-note"></div>
   <div class="card"><h2>Feed</h2><div class="feed" id="f-feed"></div></div>
 </section>
 
@@ -125,6 +148,7 @@
   </div>
   <div class="card"><h2>Live pipeline</h2><div id="ti-flow"></div></div>
   <div id="ti-kpis" class="kpis" style="margin-bottom:16px"></div>
+  <div id="ti-note"></div>
   <div class="card"><h2>Leaderboard</h2><div class="board" id="ti-board" style="min-height:60px"></div></div>
 </section>
 
@@ -144,6 +168,30 @@
   <div class="card"><h2>Monthly cost</h2><div id="c-bars"></div><div id="c-kpis" class="kpis" style="margin-top:14px"></div></div>
 </section>
 </main>
+<aside class="narrator" id="narrator" hidden aria-live="polite">
+  <div class="n-head">
+    <span class="n-badge">Demo mode</span><span class="n-step" id="n-step"></span>
+    <span class="sp">
+      <label>Pace <select id="n-pace"><option value="500">Fast</option><option value="1100" selected>Normal</option><option value="2000">Slow</option></select></label>
+      <button class="chip" id="n-tour">▶ Guided tour</button>
+      <button class="chip" id="n-off">Hide</button>
+    </span>
+  </div>
+  <div class="n-text" id="n-text">Pick any tab and run it. I'll explain each step as it happens.</div>
+  <div class="n-log" id="n-log"></div>
+</aside>
+
+<dialog class="keys" id="keys-dialog" aria-labelledby="keys-title">
+  <h2 id="keys-title">Use your own API keys</h2>
+  <p class="lede">Paste the keys you have to make every number in the demos live. You only need Jev plus one LLM key. Leave a field empty to keep that part simulated.</p>
+  <label class="field"><span>Jev · TypeSafe <a href="https://typesafe.ai" target="_blank" rel="noopener">get a key</a></span><input type="password" id="k-jev" autocomplete="off" spellcheck="false" placeholder="apikey_…"><span class="k-result" id="kr-jev"></span></label>
+  <label class="field"><span>Claude · Anthropic <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">get a key</a></span><input type="password" id="k-claude" autocomplete="off" spellcheck="false" placeholder="sk-ant-…"><span class="k-result" id="kr-claude"></span></label>
+  <label class="field"><span>Kimi · Moonshot <a href="https://platform.kimi.ai" target="_blank" rel="noopener">get a key</a></span><input type="password" id="k-kimi" autocomplete="off" spellcheck="false" placeholder="sk-…"><span class="k-result" id="kr-kimi"></span></label>
+  <div class="row"><label class="opt"><input type="checkbox" id="k-remember"> Remember on this device (stores keys in this browser's localStorage)</label></div>
+  <div class="safe"><b>How your keys are handled.</b> They stay in this browser and are sent over the connection to this app only to make your requests, then forwarded to the provider. The server does not store or log them, and each key gets its own spend cap. Use a key with a low spend limit that you can revoke, and clear it when you are done.</div>
+  <div class="row"><button class="btn" id="k-save">Save &amp; test</button><button class="btn alt" id="k-clear">Clear keys</button><button class="btn alt" id="k-close">Close</button></div>
+</dialog>
+
 <script type="module" src="/app.js"></script>
 </body>
 </html>
