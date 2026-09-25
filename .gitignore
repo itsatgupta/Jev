@@ -26,3 +26,5 @@ scripts/
 ROUTING_SETUP.md
 SETUP_COMPLETE.txt
 verify-setup.sh
+.vercel
+.env*
