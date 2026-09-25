@@ -30,7 +30,8 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.ts",
     "dev": "node --watch --env-file-if-exists=.env src/server.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.127.0",
