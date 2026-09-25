@@ -7,7 +7,8 @@ Six live, side-by-side demos of [TypeSafe's Jev](https://www.langchain.com/blog/
 
 **Jev makes the decision. An LLM writes the words. Your code owns the control flow.** Switch the LLM side between **Claude** (Haiku 4.5 / Sonnet 5 / Opus 5) and **Kimi** (K2.6 / K3) from the header — every tab, price and pipeline label follows the switch.
 
-Reference: [YouTube video](https://www.youtube.com/watch?v=d9lCIVc5AyU)
+Reference: https://www.linkedin.com/posts/atul-gupta-5434b513_typesafeai-softwareengineering-aiinproduction-activity-7509098124397830144-ZD_f?utm_source=share&utm_medium=member_desktop&rcm=ACoAAAK-P8MBuw_xSi568d9YJ3uXQqs1XhgRwxw
+
 
 ![Screenshot of the Jev demos app](docs/screenshot.png)
 
@@ -16,7 +17,7 @@ Reference: [YouTube video](https://www.youtube.com/watch?v=d9lCIVc5AyU)
 ## Quickstart
 
 ```bash
-git clone git@github.com:mayank953/Jev.git
+git clone git@github.com:itsatgupta/Jev.git
 cd Jev
 npm install
 cp .env.example .env    # optional — see "API keys" below
