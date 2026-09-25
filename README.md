@@ -1,7 +1,7 @@
 # Jev demos
 
 ![Node](https://img.shields.io/badge/node-%3E%3D22.6-339933?logo=node.js&logoColor=white)
-![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+
 
 Six live, side-by-side demos of [TypeSafe's Jev](https://www.langchain.com/blog/building-a-harness-with-jev) — a "System One" model that returns **typed, probabilistic decisions** (70–500 ms, $0.042 per 1M input tokens, output free) instead of generated text.
 
@@ -171,6 +171,4 @@ docs/
 
 This is a demo/reference project. Issues and pull requests are welcome — keep changes scoped and consistent with the existing style (plain TypeScript, no framework, no build step).
 
-## License
 
-[MIT](LICENSE) © 2026 Mayank Aggarwal
